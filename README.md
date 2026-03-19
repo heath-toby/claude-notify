@@ -23,22 +23,29 @@ All sounds are generated as sine waves at ~25% amplitude — audible but not sta
 ## Installation
 
 ```bash
-# Copy the script
-cp claude-notify ~/.local/bin/
-chmod +x ~/.local/bin/claude-notify
-
-# Generate the cached WAV files
-claude-notify --cache
-
-# Test the sounds
-claude-notify --permission       # Single beep
-claude-notify --question         # Four quick beeps
-claude-notify --complete         # Ascending arpeggio
+git clone https://github.com/heath-toby/claude-notify
+cd claude-notify
+./install.sh
 ```
 
-## Claude Code Setup
+This will:
+1. Copy the script to `~/.local/bin/`
+2. Generate cached WAV files in `~/.cache/claude-notify/`
+3. Automatically add the necessary hooks to your `~/.claude/settings.json` (preserving any existing settings)
 
-Add the following hooks to your Claude Code settings. You can either edit `~/.claude/settings.json` directly or use a project-level `.claude/settings.json`.
+Sounds will play automatically in your next Claude Code session.
+
+### Uninstall
+
+```bash
+./uninstall.sh
+```
+
+Removes the script, cached sounds, and hooks from your settings.
+
+### Manual Setup
+
+If you prefer to configure the hooks yourself, add this to `~/.claude/settings.json`:
 
 ```json
 {
@@ -67,9 +74,6 @@ Add the following hooks to your Claude Code settings. You can either edit `~/.cl
     ]
   }
 }
-```
-
-If you already have other settings in your `settings.json`, merge the `hooks` section with your existing configuration.
 
 ## How It Works
 
