@@ -1,0 +1,84 @@
+#!/bin/bash
+# Claude Code audio notifications — fast cached WAV playback
+# Patterns: --permission, --permission-strict, --question, --complete, --from-hook
+
+CACHE_DIR="$HOME/.cache/claude-notify"
+
+# Generate cached WAVs if missing (one-time, via Python)
+generate_cache() {
+    mkdir -p "$CACHE_DIR"
+    python3 -c "
+import io, math, struct, wave, os
+
+SR = 44100
+AMP = 0.25
+CACHE = '$CACHE_DIR'
+
+def tone(freq, dur):
+    n = int(SR * dur)
+    d = bytearray(n * 2)
+    fade = int(SR * 0.005)
+    for i in range(n):
+        e = 1.0
+        if i < fade: e = i / fade
+        elif i > n - fade: e = (n - i) / fade
+        struct.pack_into('<h', d, i*2, int(AMP * e * 32767 * math.sin(2*math.pi*freq*i/SR)))
+    return bytes(d)
+
+def gap(dur):
+    return b'\x00\x00' * int(SR * dur)
+
+def wav(pcm):
+    b = io.BytesIO()
+    with wave.open(b, 'w') as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(SR); w.writeframes(pcm)
+    return b.getvalue()
+
+files = {
+    'permission.wav': wav(tone(440, 0.5)),
+    'permission_strict.wav': wav(tone(440, 0.25) + gap(0.1) + tone(440, 0.25)),
+    'question.wav': wav(tone(440, 0.125) + gap(0.08) + tone(440, 0.125) + gap(0.08) + tone(440, 0.125) + gap(0.08) + tone(440, 0.125)),
+    'complete.wav': wav(tone(523.25, 0.125) + gap(0.06) + tone(659.25, 0.125) + gap(0.06) + tone(783.99, 0.125) + gap(0.06) + tone(1046.50, 0.125)),
+}
+for name, data in files.items():
+    p = os.path.join(CACHE, name)
+    if not os.path.exists(p):
+        with open(p, 'wb') as f: f.write(data)
+"
+}
+
+# Ensure cache exists
+[ -f "$CACHE_DIR/complete.wav" ] || generate_cache
+
+case "${1:-}" in
+    --permission)
+        paplay "$CACHE_DIR/permission.wav" &
+        ;;
+    --permission-strict)
+        paplay "$CACHE_DIR/permission_strict.wav" &
+        ;;
+    --question)
+        paplay "$CACHE_DIR/question.wav" &
+        ;;
+    --complete)
+        paplay "$CACHE_DIR/complete.wav" &
+        ;;
+    --from-hook)
+        # Read JSON from stdin, check message field
+        input=$(cat)
+        if echo "$input" | grep -q "needs your permission"; then
+            paplay "$CACHE_DIR/permission.wav" &
+        elif echo "$input" | grep -q "needs your attention"; then
+            paplay "$CACHE_DIR/question.wav" &
+        else
+            paplay "$CACHE_DIR/permission.wav" &
+        fi
+        ;;
+    --cache)
+        generate_cache
+        echo "Cached WAV files in $CACHE_DIR"
+        ;;
+    *)
+        echo "Usage: claude-notify --permission|--permission-strict|--question|--complete|--from-hook|--cache"
+        ;;
+esac
