@@ -1,4 +1,4 @@
-# claude-notify.ps1 — Audio notifications for Claude Code on Windows
+# claude-notify.ps1 - Audio notifications for Claude Code on Windows
 # Plays beep patterns when Claude needs your attention.
 #
 # Usage:
@@ -194,7 +194,7 @@ switch ($Command) {
     "--install"           { Install-Hooks }
     "--uninstall"         { Uninstall-Hooks }
     default {
-        Write-Host "claude-notify.ps1 — Audio notifications for Claude Code"
+        Write-Host "claude-notify.ps1 - Audio notifications for Claude Code"
         Write-Host ""
         Write-Host "Usage:"
         Write-Host "  claude-notify.ps1 --permission        Single beep"
