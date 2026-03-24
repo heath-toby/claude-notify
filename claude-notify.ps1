@@ -14,34 +14,80 @@ param(
     [string]$Command
 )
 
+# Volume: 0.0 (silent) to 1.0 (max). Adjust this to taste.
+$Volume = 0.15
+
+function Play-Tone([int]$Frequency, [int]$DurationMs) {
+    $sampleRate = 44100
+    $samples = [int]($sampleRate * $DurationMs / 1000)
+    $fadeSamples = [Math]::Min(200, [int]($samples / 4))
+    $bytes = New-Object byte[] ($samples * 2)
+    for ($i = 0; $i -lt $samples; $i++) {
+        $t = $i / $sampleRate
+        $amp = $script:Volume
+        # Fade in/out to avoid clicks
+        if ($i -lt $fadeSamples) { $amp *= $i / $fadeSamples }
+        if ($i -gt ($samples - $fadeSamples)) { $amp *= ($samples - $i) / $fadeSamples }
+        $val = [int]([Math]::Sin(2 * [Math]::PI * $Frequency * $t) * $amp * 32767)
+        $bytes[$i * 2] = [byte]($val -band 0xFF)
+        $bytes[$i * 2 + 1] = [byte](($val -shr 8) -band 0xFF)
+    }
+
+    $ms = New-Object System.IO.MemoryStream
+    $bw = New-Object System.IO.BinaryWriter($ms)
+    # WAV header
+    $dataSize = $bytes.Length
+    $bw.Write([Text.Encoding]::ASCII.GetBytes("RIFF"))
+    $bw.Write([int](36 + $dataSize))
+    $bw.Write([Text.Encoding]::ASCII.GetBytes("WAVE"))
+    $bw.Write([Text.Encoding]::ASCII.GetBytes("fmt "))
+    $bw.Write([int]16)          # chunk size
+    $bw.Write([int16]1)         # PCM
+    $bw.Write([int16]1)         # mono
+    $bw.Write([int]$sampleRate)
+    $bw.Write([int]($sampleRate * 2))  # byte rate
+    $bw.Write([int16]2)         # block align
+    $bw.Write([int16]16)        # bits per sample
+    $bw.Write([Text.Encoding]::ASCII.GetBytes("data"))
+    $bw.Write([int]$dataSize)
+    $bw.Write($bytes)
+    $ms.Position = 0
+
+    $player = New-Object System.Media.SoundPlayer($ms)
+    $player.PlaySync()
+    $player.Dispose()
+    $bw.Dispose()
+    $ms.Dispose()
+}
+
 function Play-Permission {
-    [Console]::Beep(440, 500)
+    Play-Tone 440 500
 }
 
 function Play-PermissionStrict {
-    [Console]::Beep(440, 250)
+    Play-Tone 440 250
     Start-Sleep -Milliseconds 100
-    [Console]::Beep(440, 250)
+    Play-Tone 440 250
 }
 
 function Play-Question {
-    [Console]::Beep(440, 125)
+    Play-Tone 440 125
     Start-Sleep -Milliseconds 80
-    [Console]::Beep(440, 125)
+    Play-Tone 440 125
     Start-Sleep -Milliseconds 80
-    [Console]::Beep(440, 125)
+    Play-Tone 440 125
     Start-Sleep -Milliseconds 80
-    [Console]::Beep(440, 125)
+    Play-Tone 440 125
 }
 
 function Play-Complete {
-    [Console]::Beep(523, 125)
+    Play-Tone 523 125
     Start-Sleep -Milliseconds 60
-    [Console]::Beep(659, 125)
+    Play-Tone 659 125
     Start-Sleep -Milliseconds 60
-    [Console]::Beep(784, 125)
+    Play-Tone 784 125
     Start-Sleep -Milliseconds 60
-    [Console]::Beep(1047, 125)
+    Play-Tone 1047 125
 }
 
 function From-Hook {
@@ -65,9 +111,14 @@ function Install-Hooks {
     $settingsPath = Join-Path $env:USERPROFILE ".claude\settings.json"
     $scriptPath = $PSCommandPath -replace '\\', '/'
 
-    # Build the hook commands using pwsh
-    $notifyCmd = "pwsh -NoProfile -File `"$scriptPath`" --from-hook"
-    $completeCmd = "pwsh -NoProfile -File `"$scriptPath`" --complete"
+    # Use pwsh (PowerShell 7+) if available, otherwise fall back to powershell (5.1)
+    if (Get-Command pwsh -ErrorAction SilentlyContinue) {
+        $psExe = "pwsh"
+    } else {
+        $psExe = "powershell"
+    }
+    $notifyCmd = "$psExe -NoProfile -ExecutionPolicy Bypass -Command `"& '$scriptPath' '--from-hook'`""
+    $completeCmd = "$psExe -NoProfile -ExecutionPolicy Bypass -Command `"& '$scriptPath' '--complete'`""
 
     if (Test-Path $settingsPath) {
         $settings = Get-Content $settingsPath -Raw | ConvertFrom-Json
