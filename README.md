@@ -49,6 +49,8 @@ This configures Claude Code hooks to call the PowerShell script. No compilation 
 
 To test: `pwsh -File claude-notify.ps1 --complete`
 
+To uninstall: `pwsh -File claude-notify.ps1 --uninstall`
+
 Sounds will play automatically in your next Claude Code session on both platforms.
 
 ### Manual Setup

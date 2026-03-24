@@ -126,6 +126,64 @@ function Install-Hooks {
     Write-Host "Sounds will play automatically in your next Claude Code session."
 }
 
+function Uninstall-Hooks {
+    $settingsPath = Join-Path $env:USERPROFILE ".claude\settings.json"
+
+    if (-not (Test-Path $settingsPath)) {
+        Write-Host "No settings file found at $settingsPath"
+        return
+    }
+
+    $raw = Get-Content $settingsPath -Raw
+    if ($raw -notmatch "claude-notify") {
+        Write-Host "No claude-notify hooks found in $settingsPath"
+        return
+    }
+
+    $settings = $raw | ConvertFrom-Json
+
+    if ($settings.hooks.Notification) {
+        $settings.hooks.Notification = @(
+            $settings.hooks.Notification | Where-Object {
+                $keep = $true
+                foreach ($h in $_.hooks) {
+                    if ($h.command -match "claude-notify") { $keep = $false }
+                }
+                $keep
+            }
+        )
+        if ($settings.hooks.Notification.Count -eq 0) {
+            $settings.hooks.PSObject.Properties.Remove("Notification")
+        }
+    }
+
+    if ($settings.hooks.Stop) {
+        $settings.hooks.Stop = @(
+            $settings.hooks.Stop | Where-Object {
+                $keep = $true
+                foreach ($h in $_.hooks) {
+                    if ($h.command -match "claude-notify") { $keep = $false }
+                }
+                $keep
+            }
+        )
+        if ($settings.hooks.Stop.Count -eq 0) {
+            $settings.hooks.PSObject.Properties.Remove("Stop")
+        }
+    }
+
+    # Remove hooks key if empty
+    $hookProps = $settings.hooks.PSObject.Properties | Measure-Object
+    if ($hookProps.Count -eq 0) {
+        $settings.PSObject.Properties.Remove("hooks")
+    }
+
+    $settings | ConvertTo-Json -Depth 10 | Set-Content $settingsPath -Encoding UTF8
+    Write-Host "Removed claude-notify hooks from $settingsPath"
+    Write-Host ""
+    Write-Host "You can safely delete the claude-notify folder now."
+}
+
 # Main
 switch ($Command) {
     "--permission"        { Play-Permission }
@@ -134,6 +192,7 @@ switch ($Command) {
     "--complete"          { Play-Complete }
     "--from-hook"         { From-Hook }
     "--install"           { Install-Hooks }
+    "--uninstall"         { Uninstall-Hooks }
     default {
         Write-Host "claude-notify.ps1 — Audio notifications for Claude Code"
         Write-Host ""
@@ -144,5 +203,6 @@ switch ($Command) {
         Write-Host "  claude-notify.ps1 --complete           Ascending arpeggio"
         Write-Host "  claude-notify.ps1 --from-hook          Auto-detect from JSON"
         Write-Host "  claude-notify.ps1 --install            Configure Claude Code hooks"
+        Write-Host "  claude-notify.ps1 --uninstall          Remove hooks from settings"
     }
 }
