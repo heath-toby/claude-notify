@@ -16,11 +16,13 @@ All sounds are generated as sine waves at ~25% amplitude — audible but not sta
 
 ## Requirements
 
-- **PipeWire** or **PulseAudio** (for `paplay`)
-- **Python 3** (one-time WAV generation on first run)
-- **Claude Code** with hooks support
+**Linux**: PipeWire or PulseAudio, Python 3, Claude Code with hooks support
+
+**Windows**: PowerShell 5.1+ (included with Windows), Claude Code with hooks support
 
 ## Installation
+
+### Linux
 
 ```bash
 git clone https://github.com/heath-toby/claude-notify
@@ -33,15 +35,21 @@ This will:
 2. Generate cached WAV files in `~/.cache/claude-notify/`
 3. Automatically add the necessary hooks to your `~/.claude/settings.json` (preserving any existing settings)
 
-Sounds will play automatically in your next Claude Code session.
+To uninstall: `./uninstall.sh`
 
-### Uninstall
+### Windows
 
-```bash
-./uninstall.sh
+```powershell
+git clone https://github.com/heath-toby/claude-notify
+cd claude-notify
+pwsh -File claude-notify.ps1 --install
 ```
 
-Removes the script, cached sounds, and hooks from your settings.
+This configures Claude Code hooks to call the PowerShell script. No compilation or additional software needed — it uses Windows' built-in `Console.Beep()`.
+
+To test: `pwsh -File claude-notify.ps1 --complete`
+
+Sounds will play automatically in your next Claude Code session on both platforms.
 
 ### Manual Setup
 
