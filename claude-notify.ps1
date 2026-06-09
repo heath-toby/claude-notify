@@ -17,78 +17,105 @@ param(
 # Volume: 0.0 (silent) to 1.0 (max). Adjust this to taste.
 $Volume = 0.15
 
-function Play-Tone([int]$Frequency, [int]$DurationMs) {
-    $sampleRate = 44100
-    $samples = [int]($sampleRate * $DurationMs / 1000)
-    $fadeSamples = [Math]::Min(200, [int]($samples / 4))
-    $bytes = New-Object byte[] ($samples * 2)
-    for ($i = 0; $i -lt $samples; $i++) {
-        $t = $i / $sampleRate
-        $amp = $script:Volume
-        # Fade in/out to avoid clicks
-        if ($i -lt $fadeSamples) { $amp *= $i / $fadeSamples }
-        if ($i -gt ($samples - $fadeSamples)) { $amp *= ($samples - $i) / $fadeSamples }
-        $val = [int]([Math]::Sin(2 * [Math]::PI * $Frequency * $t) * $amp * 32767)
-        $bytes[$i * 2] = [byte]($val -band 0xFF)
-        $bytes[$i * 2 + 1] = [byte](($val -shr 8) -band 0xFF)
-    }
+$SampleRate = 44100
+$CacheDir = Join-Path $env:LOCALAPPDATA "claude-notify"
 
+# --- Continuous-buffer playback (matches the Linux build) ------------------
+# Every pattern is rendered into ONE PCM buffer, with the gaps between tones
+# baked in as silence samples. That buffer is wrapped in a single WAV and
+# played once. This is what makes the Linux version sound smooth: there is no
+# per-tone SoundPlayer startup/teardown and no Start-Sleep jitter between
+# beeps -- the audio device opens once and streams the whole pattern, with
+# sample-accurate gaps, instead of four separate clips spaced ~250ms apart.
+
+# Append a tone (5ms fade in/out, to match Linux and avoid clicks) to $Buffer.
+function Add-Tone {
+    param($Buffer, [double]$Frequency, [int]$DurationMs)
+    $samples = [int]($script:SampleRate * $DurationMs / 1000)
+    $fade = [Math]::Min(220, [int]($samples / 4))   # 220 = 5ms @ 44.1kHz, as Linux
+    for ($i = 0; $i -lt $samples; $i++) {
+        $amp = $script:Volume
+        if ($i -lt $fade) { $amp *= $i / $fade }
+        elseif ($i -gt ($samples - $fade)) { $amp *= ($samples - $i) / $fade }
+        $val = [int]([Math]::Sin(2 * [Math]::PI * $Frequency * $i / $script:SampleRate) * $amp * 32767)
+        [void]$Buffer.Add([byte]($val -band 0xFF))
+        [void]$Buffer.Add([byte](($val -shr 8) -band 0xFF))
+    }
+}
+
+# Append a gap of silence to $Buffer.
+function Add-Gap {
+    param($Buffer, [int]$DurationMs)
+    $bytes = [int]($script:SampleRate * $DurationMs / 1000) * 2
+    for ($i = 0; $i -lt $bytes; $i++) { [void]$Buffer.Add([byte]0) }
+}
+
+# Build the PCM byte array for a named pattern.
+function Get-PatternPcm {
+    param([string]$Name)
+    $buf = New-Object System.Collections.Generic.List[byte]
+    switch ($Name) {
+        "permission"        { Add-Tone $buf 440 500 }
+        "permission_strict" { Add-Tone $buf 440 250; Add-Gap $buf 100; Add-Tone $buf 440 250 }
+        "question"          { Add-Tone $buf 440 125; Add-Gap $buf 80; Add-Tone $buf 440 125; Add-Gap $buf 80; Add-Tone $buf 440 125; Add-Gap $buf 80; Add-Tone $buf 440 125 }
+        "complete"          { Add-Tone $buf 523.25 125; Add-Gap $buf 60; Add-Tone $buf 659.25 125; Add-Gap $buf 60; Add-Tone $buf 783.99 125; Add-Gap $buf 60; Add-Tone $buf 1046.50 125 }
+    }
+    return $buf.ToArray()
+}
+
+# Wrap PCM bytes in a mono 16-bit WAV container.
+function Build-Wav {
+    param([byte[]]$Pcm)
     $ms = New-Object System.IO.MemoryStream
     $bw = New-Object System.IO.BinaryWriter($ms)
-    # WAV header
-    $dataSize = $bytes.Length
+    $dataSize = $Pcm.Length
     $bw.Write([Text.Encoding]::ASCII.GetBytes("RIFF"))
     $bw.Write([int](36 + $dataSize))
     $bw.Write([Text.Encoding]::ASCII.GetBytes("WAVE"))
     $bw.Write([Text.Encoding]::ASCII.GetBytes("fmt "))
-    $bw.Write([int]16)          # chunk size
-    $bw.Write([int16]1)         # PCM
-    $bw.Write([int16]1)         # mono
-    $bw.Write([int]$sampleRate)
-    $bw.Write([int]($sampleRate * 2))  # byte rate
-    $bw.Write([int16]2)         # block align
-    $bw.Write([int16]16)        # bits per sample
+    $bw.Write([int]16)                       # chunk size
+    $bw.Write([int16]1)                      # PCM
+    $bw.Write([int16]1)                      # mono
+    $bw.Write([int]$script:SampleRate)
+    $bw.Write([int]($script:SampleRate * 2)) # byte rate
+    $bw.Write([int16]2)                      # block align
+    $bw.Write([int16]16)                     # bits per sample
     $bw.Write([Text.Encoding]::ASCII.GetBytes("data"))
     $bw.Write([int]$dataSize)
-    $bw.Write($bytes)
-    $ms.Position = 0
+    $bw.Write($Pcm)
+    $bytes = $ms.ToArray()
+    $bw.Dispose(); $ms.Dispose()
+    return $bytes
+}
 
-    $player = New-Object System.Media.SoundPlayer($ms)
+# Return the path to the cached WAV for a pattern, generating it if missing.
+# The volume is encoded in the filename so changing $Volume regenerates.
+function Get-CachedWav {
+    param([string]$Name)
+    if (-not (Test-Path $script:CacheDir)) {
+        New-Item -ItemType Directory -Path $script:CacheDir -Force | Out-Null
+    }
+    $vtag = [int]([Math]::Round($script:Volume * 100))
+    $path = Join-Path $script:CacheDir "$Name-v$vtag.wav"
+    if (-not (Test-Path $path)) {
+        $wav = Build-Wav (Get-PatternPcm $Name)
+        [System.IO.File]::WriteAllBytes($path, $wav)
+    }
+    return $path
+}
+
+# Play a pattern: one cached WAV, one PlaySync, no inter-tone sleeps.
+function Play-Pattern {
+    param([string]$Name)
+    $player = New-Object System.Media.SoundPlayer((Get-CachedWav $Name))
     $player.PlaySync()
     $player.Dispose()
-    $bw.Dispose()
-    $ms.Dispose()
 }
 
-function Play-Permission {
-    Play-Tone 440 500
-}
-
-function Play-PermissionStrict {
-    Play-Tone 440 250
-    Start-Sleep -Milliseconds 100
-    Play-Tone 440 250
-}
-
-function Play-Question {
-    Play-Tone 440 125
-    Start-Sleep -Milliseconds 80
-    Play-Tone 440 125
-    Start-Sleep -Milliseconds 80
-    Play-Tone 440 125
-    Start-Sleep -Milliseconds 80
-    Play-Tone 440 125
-}
-
-function Play-Complete {
-    Play-Tone 523 125
-    Start-Sleep -Milliseconds 60
-    Play-Tone 659 125
-    Start-Sleep -Milliseconds 60
-    Play-Tone 784 125
-    Start-Sleep -Milliseconds 60
-    Play-Tone 1047 125
-}
+function Play-Permission       { Play-Pattern "permission" }
+function Play-PermissionStrict { Play-Pattern "permission_strict" }
+function Play-Question         { Play-Pattern "question" }
+function Play-Complete         { Play-Pattern "complete" }
 
 function From-Hook {
     $input_text = [Console]::In.ReadToEnd()
@@ -107,16 +134,22 @@ function From-Hook {
     }
 }
 
+# Return the PowerShell executable to invoke from the hooks.
+# Prefers pwsh (PowerShell 7+, "full"/cross-platform) when it's installed,
+# and falls back to powershell (Windows PowerShell 5.1, the default that ships
+# with Windows). Returns the bare command name so it resolves via PATH.
+function Get-PowerShellExe {
+    if (Get-Command pwsh -ErrorAction SilentlyContinue) {
+        return "pwsh"
+    }
+    return "powershell"
+}
+
 function Install-Hooks {
     $settingsPath = Join-Path $env:USERPROFILE ".claude\settings.json"
     $scriptPath = $PSCommandPath -replace '\\', '/'
 
-    # Use pwsh (PowerShell 7+) if available, otherwise fall back to powershell (5.1)
-    if (Get-Command pwsh -ErrorAction SilentlyContinue) {
-        $psExe = "pwsh"
-    } else {
-        $psExe = "powershell"
-    }
+    $psExe = Get-PowerShellExe
     $notifyCmd = "$psExe -NoProfile -ExecutionPolicy Bypass -Command `"& '$scriptPath' '--from-hook'`""
     $completeCmd = "$psExe -NoProfile -ExecutionPolicy Bypass -Command `"& '$scriptPath' '--complete'`""
 
@@ -244,6 +277,12 @@ switch ($Command) {
     "--from-hook"         { From-Hook }
     "--install"           { Install-Hooks }
     "--uninstall"         { Uninstall-Hooks }
+    "--cache"             {
+        foreach ($p in "permission","permission_strict","question","complete") {
+            Get-CachedWav $p | Out-Null
+        }
+        Write-Host "Cached WAV files in $CacheDir"
+    }
     default {
         Write-Host "claude-notify.ps1 - Audio notifications for Claude Code"
         Write-Host ""
