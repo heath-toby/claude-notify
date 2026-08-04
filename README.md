@@ -42,14 +42,18 @@ To uninstall: `./uninstall.sh`
 ```powershell
 git clone https://github.com/heath-toby/claude-notify
 cd claude-notify
-pwsh -File claude-notify.ps1 --install
+pwsh -File claude-notify.ps1 install
 ```
 
-This configures Claude Code hooks to call the PowerShell script. No compilation or additional software needed — it uses Windows' built-in `Console.Beep()`.
+Note the bare `install`, with no leading dashes. PowerShell's own parser treats `--install` as the parameter name `-install` and fails with *"A parameter cannot be found that matches parameter name '-install'"* before the script ever runs. The Windows script therefore takes bare verbs; the Linux script keeps its `--flags`.
 
-To test: `pwsh -File claude-notify.ps1 --complete`
+This configures Claude Code hooks to call the PowerShell script. It generates short PCM sine-wave WAVs once and caches them in `%LOCALAPPDATA%\claude-notify`; no compilation or additional software needed.
 
-To uninstall: `pwsh -File claude-notify.ps1 --uninstall`
+To test: `pwsh -File claude-notify.ps1 complete`
+
+To uninstall: `pwsh -File claude-notify.ps1 uninstall`
+
+If you only have Windows PowerShell 5.1 (no `pwsh`), substitute `powershell -ExecutionPolicy Bypass -File claude-notify.ps1 install`.
 
 Sounds will play automatically in your next Claude Code session on both platforms.
 

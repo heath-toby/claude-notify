@@ -2,17 +2,26 @@
 # Plays beep patterns when Claude needs your attention.
 #
 # Usage:
-#   claude-notify.ps1 --permission        Single 500ms beep
-#   claude-notify.ps1 --permission-strict  Two 250ms beeps
-#   claude-notify.ps1 --question           Four quick beeps
-#   claude-notify.ps1 --complete           Ascending arpeggio
-#   claude-notify.ps1 --from-hook          Auto-detect from stdin JSON
-#   claude-notify.ps1 --install            Configure Claude Code hooks
+#   claude-notify.ps1 permission        Single 500ms beep
+#   claude-notify.ps1 permission-strict  Two 250ms beeps
+#   claude-notify.ps1 question           Four quick beeps
+#   claude-notify.ps1 complete           Ascending arpeggio
+#   claude-notify.ps1 from-hook          Auto-detect from stdin JSON
+#   claude-notify.ps1 install            Configure Claude Code hooks
+#
+# The verbs are bare words, not --flags. PowerShell's own parser eats a leading
+# "-" before the script ever runs, so "-File claude-notify.ps1 --install" fails
+# with "A parameter cannot be found that matches parameter name '-install'".
+# Dashed forms are still accepted when they survive parsing (e.g. quoted), see
+# the normalisation below.
 
 param(
     [Parameter(Position=0)]
     [string]$Command
 )
+
+# Accept "install", "--install" and "-install" alike: strip any leading dashes.
+$Action = ($Command -replace '^-+', '').ToLowerInvariant()
 
 # Volume: 0.0 (silent) to 1.0 (max). Adjust this to taste.
 $Volume = 0.15
@@ -150,8 +159,8 @@ function Install-Hooks {
     $scriptPath = $PSCommandPath -replace '\\', '/'
 
     $psExe = Get-PowerShellExe
-    $notifyCmd = "$psExe -NoProfile -ExecutionPolicy Bypass -Command `"& '$scriptPath' '--from-hook'`""
-    $completeCmd = "$psExe -NoProfile -ExecutionPolicy Bypass -Command `"& '$scriptPath' '--complete'`""
+    $notifyCmd = "$psExe -NoProfile -ExecutionPolicy Bypass -Command `"& '$scriptPath' 'from-hook'`""
+    $completeCmd = "$psExe -NoProfile -ExecutionPolicy Bypass -Command `"& '$scriptPath' 'complete'`""
 
     if (Test-Path $settingsPath) {
         $settings = Get-Content $settingsPath -Raw | ConvertFrom-Json
@@ -203,9 +212,9 @@ function Install-Hooks {
     Write-Host "Hooks configured in $settingsPath"
     Write-Host ""
     Write-Host "Test the sounds:"
-    Write-Host "  pwsh -File `"$scriptPath`" --permission"
-    Write-Host "  pwsh -File `"$scriptPath`" --question"
-    Write-Host "  pwsh -File `"$scriptPath`" --complete"
+    Write-Host "  pwsh -File `"$scriptPath`" permission"
+    Write-Host "  pwsh -File `"$scriptPath`" question"
+    Write-Host "  pwsh -File `"$scriptPath`" complete"
     Write-Host ""
     Write-Host "Sounds will play automatically in your next Claude Code session."
 }
@@ -269,15 +278,15 @@ function Uninstall-Hooks {
 }
 
 # Main
-switch ($Command) {
-    "--permission"        { Play-Permission }
-    "--permission-strict" { Play-PermissionStrict }
-    "--question"          { Play-Question }
-    "--complete"          { Play-Complete }
-    "--from-hook"         { From-Hook }
-    "--install"           { Install-Hooks }
-    "--uninstall"         { Uninstall-Hooks }
-    "--cache"             {
+switch ($Action) {
+    "permission"        { Play-Permission }
+    "permission-strict" { Play-PermissionStrict }
+    "question"          { Play-Question }
+    "complete"          { Play-Complete }
+    "from-hook"         { From-Hook }
+    "install"           { Install-Hooks }
+    "uninstall"         { Uninstall-Hooks }
+    "cache"             {
         foreach ($p in "permission","permission_strict","question","complete") {
             Get-CachedWav $p | Out-Null
         }
@@ -287,12 +296,15 @@ switch ($Command) {
         Write-Host "claude-notify.ps1 - Audio notifications for Claude Code"
         Write-Host ""
         Write-Host "Usage:"
-        Write-Host "  claude-notify.ps1 --permission        Single beep"
-        Write-Host "  claude-notify.ps1 --permission-strict  Two beeps"
-        Write-Host "  claude-notify.ps1 --question           Four quick beeps"
-        Write-Host "  claude-notify.ps1 --complete           Ascending arpeggio"
-        Write-Host "  claude-notify.ps1 --from-hook          Auto-detect from JSON"
-        Write-Host "  claude-notify.ps1 --install            Configure Claude Code hooks"
-        Write-Host "  claude-notify.ps1 --uninstall          Remove hooks from settings"
+        Write-Host "  claude-notify.ps1 permission        Single beep"
+        Write-Host "  claude-notify.ps1 permission-strict  Two beeps"
+        Write-Host "  claude-notify.ps1 question           Four quick beeps"
+        Write-Host "  claude-notify.ps1 complete           Ascending arpeggio"
+        Write-Host "  claude-notify.ps1 from-hook          Auto-detect from JSON"
+        Write-Host "  claude-notify.ps1 install            Configure Claude Code hooks"
+        Write-Host "  claude-notify.ps1 uninstall          Remove hooks from settings"
+        Write-Host ""
+        Write-Host "Note: bare words, not --flags. PowerShell strips a leading dash"
+        Write-Host "before the script sees it."
     }
 }
